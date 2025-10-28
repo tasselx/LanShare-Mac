@@ -13,29 +13,33 @@ struct ContentView: View {
         ZStack {
             VStack(spacing: 0) {
             // 顶部状态栏
-            HStack(spacing: 15) {
+            HStack(spacing: 0) {
                 Text("LanShare")
-                    .font(.headline)
+                    .font(.title3)
                     .fontWeight(.semibold)
-                
-                Circle()
-                    .fill(networkManager.isServerRunning ? Color.green : Color.red)
-                    .frame(width: 10, height: 10)
-                
-                Text(networkManager.isServerRunning ? "服务运行中" : "服务未启动")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
                 
                 Spacer()
                 
                 if !networkManager.localIPAddress.isEmpty {
-                    HStack(spacing: 5) {
-                        Image(systemName: "network")
-                            .font(.caption)
-                        Text(networkManager.localIPAddress)
-                            .font(.system(.caption, design: .monospaced))
+                    VStack(alignment: .trailing, spacing: 6) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "network")
+                                .font(.caption)
+                            Text(networkManager.localIPAddress)
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                        .foregroundColor(.secondary)
+                        
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(networkManager.isServerRunning ? Color.green : Color.red)
+                                .frame(width: 10, height: 10)
+                            
+                            Text(networkManager.isServerRunning ? "服务运行中" : "服务未启动")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
                     }
-                    .foregroundColor(.secondary)
                 }
                 
                 if !networkManager.sharedFiles.isEmpty {
