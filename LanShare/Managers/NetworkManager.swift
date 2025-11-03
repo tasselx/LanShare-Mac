@@ -8,6 +8,8 @@ class NetworkManager: ObservableObject {
     @Published var localIPAddress: String = ""
     @Published var sharedFiles: [SharedFile] = []
     @Published private(set) var port: UInt16?
+    @Published var isSpeedLimitEnabled = false
+    @Published var speedLimitKBps: Int = 1024 // KB/s
     
     private var listener: NWListener?
     private var activeConnections: [NWConnection] = []
@@ -328,17 +330,69 @@ class NetworkManager: ObservableObject {
             response += "\r\n"
             
             if let headerData = response.data(using: .utf8) {
-                var fullData = Data()
-                fullData.append(headerData)
-                fullData.append(fileData)
-                
-                connection.send(content: fullData, completion: .contentProcessed { _ in
-                    connection.cancel()
-                })
+                if isSpeedLimitEnabled {
+                    // 限速传输：分块发送
+                    sendFileWithSpeedLimit(headerData: headerData, fileData: fileData, connection: connection)
+                } else {
+                    // 不限速：一次性发送
+                    var fullData = Data()
+                    fullData.append(headerData)
+                    fullData.append(fileData)
+                    
+                    connection.send(content: fullData, completion: .contentProcessed { _ in
+                        connection.cancel()
+                    })
+                }
             }
         } catch {
             sendHTTPResponse(connection: connection, statusCode: 500, body: "Error reading file")
         }
+    }
+    
+    private func sendFileWithSpeedLimit(headerData: Data, fileData: Data, connection: NWConnection) {
+        let chunkSize = speedLimitKBps * 1024 // 字节数
+        let delayBetweenChunks = 1.0 // 秒
+        
+        // 先发送HTTP头
+        connection.send(content: headerData, completion: .contentProcessed { [weak self] error in
+            guard error == nil else {
+                connection.cancel()
+                return
+            }
+            
+            // 然后分块发送文件数据
+            self?.sendChunks(data: fileData, chunkSize: chunkSize, delay: delayBetweenChunks, connection: connection, offset: 0)
+        })
+    }
+    
+    private func sendChunks(data: Data, chunkSize: Int, delay: TimeInterval, connection: NWConnection, offset: Int) {
+        guard offset < data.count else {
+            // 所有数据发送完成
+            connection.cancel()
+            return
+        }
+        
+        let remainingBytes = data.count - offset
+        let currentChunkSize = min(chunkSize, remainingBytes)
+        let chunk = data.subdata(in: offset..<(offset + currentChunkSize))
+        
+        connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
+            guard error == nil else {
+                connection.cancel()
+                return
+            }
+            
+            let newOffset = offset + currentChunkSize
+            if newOffset < data.count {
+                // 延迟后继续发送下一块
+                DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                    self?.sendChunks(data: data, chunkSize: chunkSize, delay: delay, connection: connection, offset: newOffset)
+                }
+            } else {
+                // 发送完成
+                connection.cancel()
+            }
+        })
     }
     
     private func sendHTTPResponse(connection: NWConnection, statusCode: Int, contentType: String = "text/plain", body: String) {

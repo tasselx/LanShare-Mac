@@ -132,6 +132,11 @@ struct ContentView: View {
             
             Divider()
             
+            // 限速设置区域
+            SpeedLimitSettingsView(networkManager: networkManager)
+            
+            Divider()
+            
             ScrollView {
                 VStack(spacing: 25) {
                     // 拖放区域
@@ -450,6 +455,124 @@ struct SharedFileCard: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// 限速设置视图
+struct SpeedLimitSettingsView: View {
+    @ObservedObject var networkManager: NetworkManager
+    @State private var speedInput: String = "1024"
+    
+    var body: some View {
+        HStack(spacing: 15) {
+            // 限速开关
+            Toggle(isOn: $networkManager.isSpeedLimitEnabled) {
+                HStack(spacing: 6) {
+                    Image(systemName: networkManager.isSpeedLimitEnabled ? "gauge.high" : "gauge.low")
+                        .font(.caption)
+                        .foregroundColor(networkManager.isSpeedLimitEnabled ? .orange : .secondary)
+                    Text("限速传输")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            
+            Divider()
+                .frame(height: 20)
+                .opacity(networkManager.isSpeedLimitEnabled ? 1 : 0)
+            
+            // 速度设置
+            HStack(spacing: 8) {
+                Text("速度限制:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                TextField("", text: $speedInput)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                    .font(.system(.caption, design: .monospaced))
+                    .onSubmit {
+                        updateSpeedLimit()
+                    }
+                    .disabled(!networkManager.isSpeedLimitEnabled)
+                
+                Text("KB/s")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                // 快速设置按钮
+                HStack(spacing: 4) {
+                    SpeedPresetButton(value: 512, label: "512", networkManager: networkManager, speedInput: $speedInput)
+                    SpeedPresetButton(value: 1024, label: "1M", networkManager: networkManager, speedInput: $speedInput)
+                    SpeedPresetButton(value: 5120, label: "5M", networkManager: networkManager, speedInput: $speedInput)
+                    SpeedPresetButton(value: 10240, label: "10M", networkManager: networkManager, speedInput: $speedInput)
+                }
+                .disabled(!networkManager.isSpeedLimitEnabled)
+            }
+            .opacity(networkManager.isSpeedLimitEnabled ? 1 : 0)
+            
+            // 实时显示当前速度
+            HStack(spacing: 6) {
+                Image(systemName: "speedometer")
+                    .font(.caption2)
+                    .foregroundColor(.blue)
+                Text("\(formatSpeed(networkManager.speedLimitKBps))")
+                    .font(.caption)
+                    .foregroundColor(.blue)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(6)
+            .opacity(networkManager.isSpeedLimitEnabled ? 1 : 0)
+            
+            Spacer()
+        }
+        .frame(height: 40)
+        .padding(.horizontal, 25)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .onAppear {
+            speedInput = "\(networkManager.speedLimitKBps)"
+        }
+    }
+    
+    private func updateSpeedLimit() {
+        if let speed = Int(speedInput), speed > 0 {
+            networkManager.speedLimitKBps = speed
+        } else {
+            speedInput = "\(networkManager.speedLimitKBps)"
+        }
+    }
+    
+    private func formatSpeed(_ kbps: Int) -> String {
+        if kbps >= 1024 {
+            let mbps = Double(kbps) / 1024.0
+            return String(format: "%.1f MB/s", mbps)
+        } else {
+            return "\(kbps) KB/s"
+        }
+    }
+}
+
+// 速度预设按钮
+struct SpeedPresetButton: View {
+    let value: Int
+    let label: String
+    @ObservedObject var networkManager: NetworkManager
+    @Binding var speedInput: String
+    
+    var body: some View {
+        Button(label) {
+            networkManager.speedLimitKBps = value
+            speedInput = "\(value)"
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        .font(.caption2)
     }
 }
 
