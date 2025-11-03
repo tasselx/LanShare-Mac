@@ -8,55 +8,127 @@ struct ContentView: View {
     @State private var showFilePicker = false
     @State private var showToast = false
     @State private var toastMessage = ""
+    @State private var hoveredFileId: String?
     
     var body: some View {
         ZStack {
+            // 背景渐变
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(nsColor: .controlBackgroundColor),
+                    Color(nsColor: .controlBackgroundColor).opacity(0.95)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            
             VStack(spacing: 0) {
-            // 顶部状态栏
+            // 顶部状态栏 - 增强版
             HStack(spacing: 0) {
-                Text("LanShare")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                if !networkManager.localIPAddress.isEmpty {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "network")
-                                .font(.caption)
-                            Text(networkManager.localIPAddress)
-                                .font(.system(.caption, design: .monospaced))
-                        }
-                        .foregroundColor(.secondary)
+                // Logo 和标题
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.7)]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 32, height: 32)
                         
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(networkManager.isServerRunning ? Color.green : Color.red)
-                                .frame(width: 10, height: 10)
-                            
-                            Text(networkManager.isServerRunning ? "服务运行中" : "服务未启动")
-                                .font(.subheadline)
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("LanShare")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                        
+                        if let port = networkManager.port {
+                            Text("端口 \(port)")
+                                .font(.system(size: 9))
                                 .foregroundColor(.secondary)
                         }
                     }
                 }
                 
+                Spacer()
+                
+                // 状态信息区域
+                if !networkManager.localIPAddress.isEmpty {
+                    HStack(spacing: 15) {
+                        // IP 地址卡片
+                        HStack(spacing: 8) {
+                            Image(systemName: "network")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            
+                            Text(networkManager.localIPAddress)
+                                .font(.system(.caption, design: .monospaced))
+                                .fontWeight(.medium)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.blue.opacity(0.1))
+                        )
+                        
+                        // 服务状态指示器
+                        HStack(spacing: 8) {
+                            ZStack {
+                                Circle()
+                                    .fill(networkManager.isServerRunning ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                                    .frame(width: 20, height: 20)
+                                
+                                Circle()
+                                    .fill(networkManager.isServerRunning ? Color.green : Color.red)
+                                    .frame(width: 10, height: 10)
+                            }
+                            
+                            Text(networkManager.isServerRunning ? "运行中" : "未启动")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(networkManager.isServerRunning ? .green : .red)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                        )
+                    }
+                }
+                
+                // 浏览器打开按钮
                 if !networkManager.sharedFiles.isEmpty {
                     Button(action: openFileListInBrowser) {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Image(systemName: "safari")
-                            Text("在浏览器中打开")
+                                .font(.caption)
+                            Text("浏览器")
+                                .font(.caption)
+                                .fontWeight(.medium)
                         }
-                        .font(.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 }
             }
             .padding(.horizontal, 25)
-            .padding(.vertical, 12)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .padding(.vertical, 15)
+            .background(
+                Color(nsColor: .controlBackgroundColor)
+                    .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+            )
             
             Divider()
             
