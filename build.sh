@@ -120,7 +120,10 @@ echo ""
 # 创建 DMG（可选）
 echo -e "${YELLOW}[5/5] 创建 DMG 安装包...${NC}"
 
-DMG_NAME="${PROJECT_NAME}.dmg"
+# 获取版本号
+APP_VERSION=$(defaults read "${EXPORT_PATH}/${XCODE_APP_NAME}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "1.0")
+
+DMG_NAME="${PROJECT_NAME}-${APP_VERSION}.dmg"
 DMG_PATH="${BUILD_DIR}/${DMG_NAME}"
 VOLUME_NAME="LanShare"
 
@@ -166,7 +169,6 @@ echo -e "  原始应用: ${GREEN}${EXPORT_PATH}/${XCODE_APP_NAME}${NC}"
 echo -e "  DMG 安装包: ${GREEN}${DMG_PATH}${NC}"
 echo ""
 echo -e "${YELLOW}应用信息：${NC}"
-APP_VERSION=$(defaults read "${EXPORT_PATH}/${XCODE_APP_NAME}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "未知")
 APP_BUILD=$(defaults read "${EXPORT_PATH}/${XCODE_APP_NAME}/Contents/Info.plist" CFBundleVersion 2>/dev/null || echo "未知")
 APP_SIZE=$(du -sh "${EXPORT_PATH}/${XCODE_APP_NAME}" | cut -f1)
 DMG_SIZE=$(du -sh "$DMG_PATH" | cut -f1)
