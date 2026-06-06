@@ -21,3 +21,16 @@ struct SharedFile: Identifiable, Hashable {
         lhs.id == rhs.id
     }
 }
+
+// 局域网共享剪贴板条目（一条被复制/发送的文本）
+struct ClipboardItem: Identifiable, Hashable {
+    let id: String
+    let text: String
+    let date: Date
+    
+    init(text: String, date: Date = Date()) {
+        self.id = UUID().uuidString
+        self.text = text
+        self.date = date
+    }
+}

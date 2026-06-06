@@ -4,6 +4,7 @@ import CoreImage.CIFilterBuiltins
 
 struct ContentView: View {
     @EnvironmentObject var networkManager: NetworkManager
+    @StateObject private var updateChecker = UpdateChecker()
     @State private var isDragging = false
     @State private var showFilePicker = false
     @State private var showToast = false
@@ -106,6 +107,30 @@ struct ContentView: View {
                     }
                 }
                 
+                // 检查更新按钮（有新版本时显示红点）
+                if updateChecker.hasUpdate {
+                    Button(action: openReleasePage) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.caption)
+                            Text("更新")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .overlay(alignment: .topTrailing) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                            .offset(x: 3, y: -3)
+                    }
+                    .help("发现新版本 \(updateChecker.latestVersion)，点击前往更新")
+                }
+                
                 // 浏览器打开按钮
                 if !networkManager.sharedFiles.isEmpty {
                     Button(action: openFileListInBrowser) {
@@ -175,6 +200,15 @@ struct ContentView: View {
                         return true
                     }
                     
+                    // 局域网共享剪贴板
+                    ClipboardShareView(
+                        networkManager: networkManager,
+                        onCopySuccess: { message in
+                            showToastMessage(message)
+                        }
+                    )
+                    .padding(.horizontal, 25)
+                    
                     // 共享文件列表
                     if !networkManager.sharedFiles.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -243,6 +277,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 750, minHeight: 550)
+        .onAppear { updateChecker.checkForUpdate() }
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [.item],
@@ -278,6 +313,13 @@ struct ContentView: View {
     
     private func openFileListInBrowser() {
         if let url = URL(string: networkManager.getFileListURL()) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    // 打开 GitHub release 页面进行更新
+    private func openReleasePage() {
+        if let url = URL(string: updateChecker.releaseURL) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -452,6 +494,271 @@ struct SharedFileCard: View {
     }
     
     private func formatDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// 极简纯净风（Linear/Things）配色，强调色与 App 主色（系统蓝）一致
+extension Color {
+    static let lsAccent = Color(red: 0.0, green: 0.478, blue: 1.0)   // #007AFF 系统蓝
+    static let lsCardBorder = Color.primary.opacity(0.08)
+    static let lsDivider = Color.primary.opacity(0.06)
+}
+
+// 局域网共享剪贴板视图（Mac 端）：实时监听系统剪贴板，整行卡片列表展示
+struct ClipboardShareView: View {
+    @ObservedObject var networkManager: NetworkManager
+    let onCopySuccess: (String) -> Void
+    
+    @State private var qrCodeImage: NSImage?
+    
+    private var clipboardURL: String {
+        networkManager.getClipboardURL()
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            
+            Divider().overlay(Color.lsDivider)
+            
+            // 左：剪贴板记录列表；右：常驻二维码连接面板
+            HStack(alignment: .top, spacing: 18) {
+                Group {
+                    if networkManager.clipboardItems.isEmpty {
+                        emptyState
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(networkManager.clipboardItems.enumerated()), id: \.element.id) { index, item in
+                                    ClipboardRowView(
+                                        item: item,
+                                        onCopy: { copyItem(item) },
+                                        onRemove: { networkManager.removeClipboardItem(item) }
+                                    )
+                                    if index < networkManager.clipboardItems.count - 1 {
+                                        Divider().overlay(Color.lsDivider)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 240)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                qrColumn
+            }
+            .padding(.top, 16)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.lsCardBorder, lineWidth: 1)
+        )
+        .onAppear { generateQRCode() }
+        // 端口/IP 就绪或变化时刷新二维码，保证地址实时正确
+        .onChange(of: clipboardURL) { _ in generateQRCode() }
+    }
+    
+    // 标题栏
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.on.clipboard")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(.lsAccent)
+            
+            Text("共享剪贴板")
+                .font(.system(size: 15, weight: .semibold))
+            
+            Text("\(networkManager.clipboardItems.count)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
+            
+            Spacer()
+            
+            iconButton(systemName: "safari") { openClipboardInBrowser() }
+                .help("浏览器打开")
+            
+            if !networkManager.clipboardItems.isEmpty {
+                iconButton(systemName: "trash") { networkManager.clearClipboardItems() }
+                    .help("清空全部")
+            }
+        }
+        .padding(.bottom, 14)
+    }
+    
+    // 常驻二维码连接面板
+    private var qrColumn: some View {
+        VStack(spacing: 10) {
+            Group {
+                if let qrImage = qrCodeImage {
+                    Image(nsImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 116, height: 116)
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.black.opacity(0.05))
+                        .frame(width: 116, height: 116)
+                        .overlay(ProgressView())
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.lsCardBorder, lineWidth: 1))
+            
+            VStack(spacing: 3) {
+                HStack(spacing: 5) {
+                    Image(systemName: "qrcode")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("扫码连接")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(.lsAccent)
+                
+                Text("手机扫码查看/发送")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(width: 140)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.lsAccent.opacity(0.05)))
+    }
+    
+    // 空态
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "doc.on.clipboard")
+                .font(.system(size: 26))
+                .foregroundColor(.secondary.opacity(0.5))
+            Text("在 Mac 上复制任意文本即可自动出现")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 150)
+    }
+    
+    // 统一的小图标按钮
+    private func iconButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.primary.opacity(0.05))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+    
+    // 生成剪贴板地址二维码
+    private func generateQRCode() {
+        let urlString = clipboardURL
+        guard !urlString.isEmpty else { return }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let context = CIContext()
+            let filter = CIFilter.qrCodeGenerator()
+            filter.message = Data(urlString.utf8)
+            filter.correctionLevel = "M"
+            
+            if let outputImage = filter.outputImage {
+                let transform = CGAffineTransform(scaleX: 10, y: 10)
+                let scaledImage = outputImage.transformed(by: transform)
+                
+                if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
+                    let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 120, height: 120))
+                    DispatchQueue.main.async {
+                        self.qrCodeImage = nsImage
+                    }
+                }
+            }
+        }
+    }
+    
+    // 把某条剪贴板内容重新写回系统剪贴板
+    private func copyItem(_ item: ClipboardItem) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(item.text, forType: .string)
+        onCopySuccess("已复制到系统剪贴板")
+    }
+    
+    private func openClipboardInBrowser() {
+        if let url = URL(string: clipboardURL) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+// 单条剪贴板记录：整行卡片，悬停显示复制/删除
+struct ClipboardRowView: View {
+    let item: ClipboardItem
+    let onCopy: () -> Void
+    let onRemove: () -> Void
+    
+    @State private var isHovered = false
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.text)
+                    .font(.system(size: 13))
+                    .foregroundColor(.primary)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                
+                Text(relativeTime(item.date))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            
+            HStack(spacing: 4) {
+                Button(action: onCopy) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.lsAccent)
+                        .frame(width: 26, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.lsAccent.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
+                .help("复制到系统剪贴板")
+                
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 26, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+                }
+                .buttonStyle(.plain)
+                .help("删除此条")
+            }
+            .opacity(isHovered ? 1 : 0.35)
+        }
+        .padding(.vertical, 11)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+    
+    private func relativeTime(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
