@@ -13,14 +13,14 @@ class NetworkManager: ObservableObject {
     @Published var speedLimitKBps: Int = 1024 // KB/s
     // 局域网共享剪贴板条目列表（最新的在最前；来自 Mac 系统剪贴板或网页发送）
     @Published var clipboardItems: [ClipboardItem] = []
-    
+
     private var listener: NWListener?
     private var activeConnections: [NWConnection] = []
     // 剪贴板监听：定时轮询 NSPasteboard 的 changeCount
     private var pasteboardTimer: Timer?
     private var lastChangeCount: Int = NSPasteboard.general.changeCount
     private let maxClipboardItems = 50 // 最多保留的剪贴板条目数
-    
+
     // 两个分享网页共用的设计系统样式（极简纯净 Linear/Things 风 + 深色模式自适应）
     private static let sharedPageStyle = """
         <style>
@@ -97,26 +97,30 @@ class NetworkManager: ObservableObject {
             }
         </style>
         """
-    
+
     init() {
         getLocalIPAddress()
+        startServices()
+    }
+
+    func startServices() {
         startHTTPServer()
         startClipboardMonitoring()
     }
-    
+
     // 获取本机 IP 地址
     private func getLocalIPAddress() {
         var address: String = ""
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
-        
+
         if getifaddrs(&ifaddr) == 0 {
             var ptr = ifaddr
             while ptr != nil {
                 defer { ptr = ptr?.pointee.ifa_next }
-                
+
                 guard let interface = ptr?.pointee else { continue }
                 let addrFamily = interface.ifa_addr.pointee.sa_family
-                
+
                 if addrFamily == UInt8(AF_INET) {
                     let name = String(cString: interface.ifa_name)
                     if name == "en0" || name == "en1" {
@@ -131,22 +135,24 @@ class NetworkManager: ObservableObject {
             }
             freeifaddrs(ifaddr)
         }
-        
+
         DispatchQueue.main.async {
             self.localIPAddress = address.isEmpty ? "未获取到IP" : address
         }
     }
-    
+
     // 启动 HTTP 服务器
     func startHTTPServer() {
+        guard listener == nil else { return }
+
         do {
             let parameters = NWParameters.tcp
             let listener = try NWListener(using: parameters)
-            
+
             listener.newConnectionHandler = { [weak self] connection in
                 self?.handleHTTPConnection(connection)
             }
-            
+
             listener.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
@@ -168,56 +174,56 @@ class NetworkManager: ObservableObject {
                     break
                 }
             }
-            
+
             listener.start(queue: .global())
             self.listener = listener
-            
+
         } catch {
             print("无法创建监听器: \(error)")
         }
     }
-    
+
     // 处理 HTTP 连接
     private func handleHTTPConnection(_ connection: NWConnection) {
         activeConnections.append(connection)
         connection.start(queue: .global())
-        
+
         receiveHTTPRequest(connection)
     }
-    
+
     private func receiveHTTPRequest(_ connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self, let data = data, !data.isEmpty else {
                 connection.cancel()
                 return
             }
-            
+
             if let request = String(data: data, encoding: .utf8) {
                 self.handleHTTPRequest(request, connection: connection)
             }
-            
+
             if !isComplete {
                 self.receiveHTTPRequest(connection)
             }
         }
     }
-    
+
     private func handleHTTPRequest(_ request: String, connection: NWConnection) {
         let lines = request.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else {
             sendHTTPResponse(connection: connection, statusCode: 400, body: "Bad Request")
             return
         }
-        
+
         let components = requestLine.components(separatedBy: " ")
         guard components.count >= 2 else {
             sendHTTPResponse(connection: connection, statusCode: 400, body: "Bad Request")
             return
         }
-        
+
         let method = components[0]
         let path = components[1]
-        
+
         // 剪贴板相关路由（局域网共享剪贴板）
         switch path {
         case "/clipboard":
@@ -241,7 +247,7 @@ class NetworkManager: ObservableObject {
         default:
             break
         }
-        
+
         if path == "/" {
             // 返回文件列表页面
             sendFileListPage(connection: connection)
@@ -253,21 +259,21 @@ class NetworkManager: ObservableObject {
             downloadFile(fileId: fileId, connection: connection)
         }
     }
-    
+
     // 从完整 HTTP 请求文本中提取请求体（以空行 \r\n\r\n 分隔头与体）
     private func extractRequestBody(from request: String) -> String {
         guard let range = request.range(of: "\r\n\r\n") else { return "" }
         return String(request[range.upperBound...])
     }
-    
+
     private func sendFileListPage(connection: NWConnection) {
         guard let port = port else {
             sendHTTPResponse(connection: connection, statusCode: 503, body: "Server not ready")
             return
         }
-        
+
         let baseURL = "http://\(localIPAddress):\(port)"
-        
+
         var html = """
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -315,7 +321,7 @@ class NetworkManager: ObservableObject {
                     <div class="card-title"><span>📁 共享文件</span></div>
                     <div class="files">
         """
-        
+
         if sharedFiles.isEmpty {
             html += "<div class='empty'>📭<br>暂无共享文件</div>"
         } else {
@@ -323,7 +329,7 @@ class NetworkManager: ObservableObject {
                 let fileExtension = (file.name as NSString).pathExtension
                 let shortLink = fileExtension.isEmpty ? file.id : "\(file.id).\(fileExtension)"
                 let fullURL = "\(baseURL)/\(shortLink)"
-                
+
                 html += """
                     <div class="file-item">
                         <div class="file-header">
@@ -358,7 +364,7 @@ class NetworkManager: ObservableObject {
                 """
             }
         }
-        
+
         html += """
                     </div>
                 </section>
@@ -372,19 +378,19 @@ class NetworkManager: ObservableObject {
             </div>
             <script>
                 const qrCodes = {};
-                
+
                 function toggleDetails(fileId) {
                     const details = document.getElementById('details-' + fileId);
                     const icon = document.getElementById('icon-' + fileId);
                     const isShowing = details.classList.contains('show');
-                    
+
                     if (isShowing) {
                         details.classList.remove('show');
                         icon.textContent = '📱';
                     } else {
                         details.classList.add('show');
                         icon.textContent = '✕';
-                        
+
                         // 生成二维码（如果还没生成）
                         if (!qrCodes[fileId]) {
                             const qrContainer = document.getElementById('qr-' + fileId);
@@ -401,7 +407,7 @@ class NetworkManager: ObservableObject {
                         }
                     }
                 }
-                
+
                 function copyLink(url) {
                     navigator.clipboard.writeText(url).then(() => {
                         const toast = document.getElementById('toast');
@@ -417,7 +423,7 @@ class NetworkManager: ObservableObject {
                         textarea.select();
                         document.execCommand('copy');
                         document.body.removeChild(textarea);
-                        
+
                         const toast = document.getElementById('toast');
                         toast.classList.add('show');
                         setTimeout(() => {
@@ -429,27 +435,27 @@ class NetworkManager: ObservableObject {
         </body>
         </html>
         """
-        
+
         sendHTTPResponse(connection: connection, statusCode: 200, contentType: "text/html; charset=utf-8", body: html)
     }
-    
+
     private func downloadFile(fileId: String, connection: NWConnection) {
         guard let file = sharedFiles.first(where: { $0.id == fileId }) else {
             sendHTTPResponse(connection: connection, statusCode: 404, body: "File not found")
             return
         }
-        
+
         do {
             let fileData = try Data(contentsOf: file.url)
             let fileName = file.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.name
-            
+
             var response = "HTTP/1.1 200 OK\r\n"
             response += "Content-Type: application/octet-stream\r\n"
             response += "Content-Disposition: attachment; filename=\"\(fileName)\"\r\n"
             response += "Content-Length: \(fileData.count)\r\n"
             response += "Connection: close\r\n"
             response += "\r\n"
-            
+
             if let headerData = response.data(using: .utf8) {
                 if isSpeedLimitEnabled {
                     // 限速传输：分块发送
@@ -459,7 +465,7 @@ class NetworkManager: ObservableObject {
                     var fullData = Data()
                     fullData.append(headerData)
                     fullData.append(fileData)
-                    
+
                     connection.send(content: fullData, completion: .contentProcessed { _ in
                         connection.cancel()
                     })
@@ -469,40 +475,40 @@ class NetworkManager: ObservableObject {
             sendHTTPResponse(connection: connection, statusCode: 500, body: "Error reading file")
         }
     }
-    
+
     private func sendFileWithSpeedLimit(headerData: Data, fileData: Data, connection: NWConnection) {
         let chunkSize = speedLimitKBps * 1024 // 字节数
         let delayBetweenChunks = 1.0 // 秒
-        
+
         // 先发送HTTP头
         connection.send(content: headerData, completion: .contentProcessed { [weak self] error in
             guard error == nil else {
                 connection.cancel()
                 return
             }
-            
+
             // 然后分块发送文件数据
             self?.sendChunks(data: fileData, chunkSize: chunkSize, delay: delayBetweenChunks, connection: connection, offset: 0)
         })
     }
-    
+
     private func sendChunks(data: Data, chunkSize: Int, delay: TimeInterval, connection: NWConnection, offset: Int) {
         guard offset < data.count else {
             // 所有数据发送完成
             connection.cancel()
             return
         }
-        
+
         let remainingBytes = data.count - offset
         let currentChunkSize = min(chunkSize, remainingBytes)
         let chunk = data.subdata(in: offset..<(offset + currentChunkSize))
-        
+
         connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
             guard error == nil else {
                 connection.cancel()
                 return
             }
-            
+
             let newOffset = offset + currentChunkSize
             if newOffset < data.count {
                 // 延迟后继续发送下一块
@@ -515,7 +521,7 @@ class NetworkManager: ObservableObject {
             }
         })
     }
-    
+
     private func sendHTTPResponse(connection: NWConnection, statusCode: Int, contentType: String = "text/plain", body: String) {
         let statusText = statusCode == 200 ? "OK" : statusCode == 404 ? "Not Found" : "Error"
         var response = "HTTP/1.1 \(statusCode) \(statusText)\r\n"
@@ -524,32 +530,32 @@ class NetworkManager: ObservableObject {
         response += "Connection: close\r\n"
         response += "\r\n"
         response += body
-        
+
         if let data = response.data(using: .utf8) {
             connection.send(content: data, completion: .contentProcessed { _ in
                 connection.cancel()
             })
         }
     }
-    
+
     private func formatFileSize(_ bytes: Int64) -> String {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
     }
-    
+
     // 添加共享文件
     func shareFile(url: URL) -> SharedFile {
         let fileName = url.lastPathComponent
         // 使用文件路径的 MD5 作为短链接 ID
         let fileId = generateMD5(from: url.path + Date().timeIntervalSince1970.description)
-        
+
         var fileSize: Int64 = 0
         if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
            let size = attributes[.size] as? Int64 {
             fileSize = size
         }
-        
+
         let sharedFile = SharedFile(
             id: fileId,
             name: fileName,
@@ -557,34 +563,34 @@ class NetworkManager: ObservableObject {
             size: fileSize,
             shareDate: Date()
         )
-        
+
         DispatchQueue.main.async {
             self.sharedFiles.append(sharedFile)
         }
-        
+
         return sharedFile
     }
-    
+
     // 生成 MD5 短链接
     private func generateMD5(from string: String) -> String {
         guard let data = string.data(using: .utf8) else { return UUID().uuidString }
-        
+
         var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
         data.withUnsafeBytes { buffer in
             _ = CC_MD5(buffer.baseAddress, CC_LONG(buffer.count), &digest)
         }
-        
+
         // 取前8位作为短链接
         return digest.prefix(4).map { String(format: "%02x", $0) }.joined()
     }
-    
+
     // 移除共享文件
     func removeSharedFile(_ file: SharedFile) {
         DispatchQueue.main.async {
             self.sharedFiles.removeAll { $0.id == file.id }
         }
     }
-    
+
     // 生成分享链接（MD5短链 + 文件后缀）
     func getShareURL(for file: SharedFile) -> String {
         let fileExtension = (file.name as NSString).pathExtension
@@ -592,39 +598,41 @@ class NetworkManager: ObservableObject {
         guard let port = port else { return "" }
         return "http://\(localIPAddress):\(port)/\(shortLink)"
     }
-    
+
     // 生成文件列表链接
     func getFileListURL() -> String {
         guard let port = port else { return "" }
         return "http://\(localIPAddress):\(port)/"
     }
-    
+
     // MARK: - 局域网共享剪贴板
-    
+
     // 生成剪贴板网页链接
     func getClipboardURL() -> String {
         guard let port = port else { return "" }
         return "http://\(localIPAddress):\(port)/clipboard"
     }
-    
+
     // 启动剪贴板监听：定时轮询系统剪贴板，内容变化时自动收录为新条目
     private func startClipboardMonitoring() {
+        guard pasteboardTimer == nil else { return }
+
         let timer = Timer(timeInterval: 0.8, repeats: true) { [weak self] _ in
             self?.checkPasteboardChange()
         }
         RunLoop.main.add(timer, forMode: .common)
         pasteboardTimer = timer
     }
-    
+
     private func checkPasteboardChange() {
         let pasteboard = NSPasteboard.general
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
-        
+
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
         // 与最新条目相同则跳过，避免重复
         if clipboardItems.first?.text == text { return }
-        
+
         let item = ClipboardItem(text: text)
         DispatchQueue.main.async {
             self.clipboardItems.insert(item, at: 0)
@@ -633,7 +641,7 @@ class NetworkManager: ObservableObject {
             }
         }
     }
-    
+
     // 写入 Mac 系统剪贴板（监听器会自动收录为新条目）
     func writeToSystemPasteboard(_ text: String) {
         guard !text.isEmpty else { return }
@@ -641,21 +649,21 @@ class NetworkManager: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
     }
-    
+
     // 删除指定剪贴板条目
     func removeClipboardItem(_ item: ClipboardItem) {
         DispatchQueue.main.async {
             self.clipboardItems.removeAll { $0.id == item.id }
         }
     }
-    
+
     // 清空全部剪贴板条目
     func clearClipboardItems() {
         DispatchQueue.main.async {
             self.clipboardItems.removeAll()
         }
     }
-    
+
     // 把剪贴板条目列表序列化为 JSON（供网页轮询渲染）
     private func clipboardItemsJSON() -> String {
         let formatter = ISO8601DateFormatter()
@@ -668,7 +676,7 @@ class NetworkManager: ObservableObject {
         }
         return "[]"
     }
-    
+
     // 生成剪贴板共享网页：发送文本到 Mac + 实时展示剪贴板条目列表（各自一键复制）
     private func sendClipboardPage(connection: NWConnection) {
         let html = """
@@ -704,7 +712,7 @@ class NetworkManager: ObservableObject {
                     </div>
                     <a class="back" href="/">← 返回文件</a>
                 </header>
-        
+
                 <section class="card">
                     <div class="card-title">⬆️ 发送文本到 Mac</div>
                     <textarea id="outgoing" placeholder="在此输入要发送到 Mac 的文本…"></textarea>
@@ -714,25 +722,25 @@ class NetworkManager: ObservableObject {
                     </div>
                     <div class="hint">💡 发送后会写入 Mac 的系统剪贴板，并出现在下方列表</div>
                 </section>
-        
+
                 <section class="card">
                     <div class="card-title"><span class="dot"></span> 剪贴板记录（实时同步）</div>
                     <div id="list"><div class="empty">加载中…</div></div>
                 </section>
             </div>
-        
+
             <div id="toast" class="toast">操作成功</div>
-        
+
             <script>
                 let lastSignature = '';
-        
+
                 function showToast(msg) {
                     const t = document.getElementById('toast');
                     t.textContent = msg;
                     t.classList.add('show');
                     setTimeout(() => t.classList.remove('show'), 1800);
                 }
-        
+
                 function copyText(text) {
                     navigator.clipboard.writeText(text).then(() => showToast('已复制')).catch(() => {
                         const ta = document.createElement('textarea');
@@ -744,7 +752,7 @@ class NetworkManager: ObservableObject {
                         showToast('已复制');
                     });
                 }
-        
+
                 function sendText() {
                     const text = document.getElementById('outgoing').value;
                     if (!text) { showToast('请输入内容'); return; }
@@ -752,14 +760,14 @@ class NetworkManager: ObservableObject {
                         .then(() => { showToast('已发送到 Mac'); document.getElementById('outgoing').value=''; poll(); })
                         .catch(() => showToast('发送失败'));
                 }
-        
+
                 function fmtDate(iso) {
                     const d = new Date(iso);
                     if (isNaN(d)) return '';
                     const p = n => (n < 10 ? '0' + n : n);
                     return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
                 }
-        
+
                 function render(items) {
                     const list = document.getElementById('list');
                     list.innerHTML = '';
@@ -773,23 +781,23 @@ class NetworkManager: ObservableObject {
                     items.forEach(it => {
                         const item = document.createElement('div');
                         item.className = 'item';
-        
+
                         const txt = document.createElement('div');
                         txt.className = 'item-text';
                         txt.textContent = it.text;
-        
+
                         const foot = document.createElement('div');
                         foot.className = 'item-foot';
-        
+
                         const date = document.createElement('span');
                         date.className = 'item-date';
                         date.textContent = fmtDate(it.date);
-        
+
                         const btn = document.createElement('button');
                         btn.className = 'copy-btn';
                         btn.textContent = '📋 复制';
                         btn.onclick = () => copyText(it.text);
-        
+
                         foot.appendChild(date);
                         foot.appendChild(btn);
                         item.appendChild(txt);
@@ -797,7 +805,7 @@ class NetworkManager: ObservableObject {
                         list.appendChild(item);
                     });
                 }
-        
+
                 async function poll() {
                     try {
                         const res = await fetch('/clipboard/get');
@@ -815,10 +823,10 @@ class NetworkManager: ObservableObject {
         </body>
         </html>
         """
-        
+
         sendHTTPResponse(connection: connection, statusCode: 200, contentType: "text/html; charset=utf-8", body: html)
     }
-    
+
     deinit {
         pasteboardTimer?.invalidate()
         listener?.cancel()

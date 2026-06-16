@@ -2,6 +2,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 import CoreImage.CIFilterBuiltins
 
+// 主界面 Tab 枚举
+enum AppTab: String, CaseIterable {
+    case files = "共享文件"
+    case clipboard = "共享剪贴板"
+
+    var icon: String {
+        switch self {
+        case .files: return "doc.fill"
+        case .clipboard: return "doc.on.clipboard.fill"
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var networkManager: NetworkManager
     @StateObject private var updateChecker = UpdateChecker()
@@ -10,248 +23,45 @@ struct ContentView: View {
     @State private var showToast = false
     @State private var toastMessage = ""
     @State private var hoveredFileId: String?
-    
+    @State private var selectedTab: AppTab = .files
+
     var body: some View {
         ZStack {
-            // 背景渐变
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(nsColor: .controlBackgroundColor),
-                    Color(nsColor: .controlBackgroundColor).opacity(0.95)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color.lsWindowBackground
             .ignoresSafeArea()
-            
+
             VStack(spacing: 0) {
-            // 顶部状态栏 - 增强版
-            HStack(spacing: 0) {
-                // Logo 和标题
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.7)]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 32, height: 32)
-                        
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("LanShare")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                        
-                        if let port = networkManager.port {
-                            Text("端口 \(port)")
-                                .font(.system(size: 9))
-                                .foregroundColor(.secondary)
-                        }
+                headerBar
+
+                VStack(spacing: 12) {
+                    tabPicker
+
+                    if selectedTab == .files {
+                        SpeedLimitSettingsView(networkManager: networkManager)
                     }
                 }
-                
-                Spacer()
-                
-                // 状态信息区域
-                if !networkManager.localIPAddress.isEmpty {
-                    HStack(spacing: 15) {
-                        // IP 地址卡片
-                        HStack(spacing: 8) {
-                            Image(systemName: "network")
-                                .font(.caption)
-                                .foregroundColor(.blue)
-                            
-                            Text(networkManager.localIPAddress)
-                                .font(.system(.caption, design: .monospaced))
-                                .fontWeight(.medium)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.blue.opacity(0.1))
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, selectedTab == .files ? 10 : 4)
+
+                Group {
+                    if selectedTab == .files {
+                        filesContent
+                    } else {
+                        ClipboardShareView(
+                            networkManager: networkManager,
+                            onCopySuccess: { message in
+                                showToastMessage(message)
+                            }
                         )
-                        
-                        // 服务状态指示器
-                        HStack(spacing: 8) {
-                            ZStack {
-                                Circle()
-                                    .fill(networkManager.isServerRunning ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
-                                    .frame(width: 20, height: 20)
-                                
-                                Circle()
-                                    .fill(networkManager.isServerRunning ? Color.green : Color.red)
-                                    .frame(width: 10, height: 10)
-                            }
-                            
-                            Text(networkManager.isServerRunning ? "运行中" : "未启动")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(networkManager.isServerRunning ? .green : .red)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(nsColor: .controlBackgroundColor))
-                                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-                        )
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .padding(.bottom, 24)
                     }
                 }
-                
-                // 检查更新按钮（有新版本时显示红点）
-                if updateChecker.hasUpdate {
-                    Button(action: openReleasePage) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.caption)
-                            Text("更新")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .overlay(alignment: .topTrailing) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                            .offset(x: 3, y: -3)
-                    }
-                    .help("发现新版本 \(updateChecker.latestVersion)，点击前往更新")
-                }
-                
-                // 浏览器打开按钮
-                if !networkManager.sharedFiles.isEmpty {
-                    Button(action: openFileListInBrowser) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "safari")
-                                .font(.caption)
-                            Text("浏览器")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .padding(.horizontal, 25)
-            .padding(.vertical, 15)
-            .background(
-                Color(nsColor: .controlBackgroundColor)
-                    .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-            )
-            
-            Divider()
-            
-            // 限速设置区域
-            SpeedLimitSettingsView(networkManager: networkManager)
-            
-            Divider()
-            
-            ScrollView {
-                VStack(spacing: 25) {
-                    // 拖放区域
-                    VStack(spacing: 15) {
-                        Image(systemName: isDragging ? "arrow.down.doc.fill" : "square.and.arrow.up")
-                            .font(.system(size: 50))
-                            .foregroundColor(isDragging ? .blue : .secondary)
-                        
-                        Text(isDragging ? "松开以添加文件" : "拖放文件到这里")
-                            .font(.title3)
-                            .fontWeight(.medium)
-                        
-                        Button("或点击选择文件") {
-                            showFilePicker = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 220)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(
-                                isDragging ? Color.blue : Color.gray.opacity(0.3),
-                                style: StrokeStyle(lineWidth: 2, dash: [8])
-                            )
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(isDragging ? Color.blue.opacity(0.05) : Color.clear)
-                            )
-                    )
-                    .padding(.horizontal, 25)
-                    .padding(.top, 20)
-                    .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
-                        handleDrop(providers: providers)
-                        return true
-                    }
-                    
-                    // 局域网共享剪贴板
-                    ClipboardShareView(
-                        networkManager: networkManager,
-                        onCopySuccess: { message in
-                            showToastMessage(message)
-                        }
-                    )
-                    .padding(.horizontal, 25)
-                    
-                    // 共享文件列表
-                    if !networkManager.sharedFiles.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("共享中的文件")
-                                    .font(.headline)
-                                
-                                Spacer()
-                                
-                                Text("\(networkManager.sharedFiles.count) 个")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Color.gray.opacity(0.15))
-                                    .cornerRadius(8)
-                            }
-                            .padding(.horizontal, 25)
-                            
-                            VStack(spacing: 10) {
-                                ForEach(networkManager.sharedFiles) { file in
-                                    SharedFileCard(
-                                        file: file,
-                                        networkManager: networkManager,
-                                        onRemove: {
-                                            withAnimation {
-                                                networkManager.removeSharedFile(file)
-                                            }
-                                        },
-                                        onCopySuccess: { message in
-                                            showToastMessage(message)
-                                        }
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 25)
-                        }
-                        .padding(.bottom, 20)
-                    }
-                }
-            }
-            }
-            
+
             // Toast 提示
             if showToast {
                 VStack {
@@ -276,8 +86,11 @@ struct ContentView: View {
                 .transition(.scale.combined(with: .opacity))
             }
         }
-        .frame(minWidth: 750, minHeight: 550)
-        .onAppear { updateChecker.checkForUpdate() }
+        .frame(minWidth: 780, minHeight: 580)
+        .onAppear {
+            networkManager.startServices()
+            updateChecker.checkForUpdate()
+        }
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [.item],
@@ -286,7 +99,272 @@ struct ContentView: View {
             handleFileSelection(result: result)
         }
     }
-    
+
+    private var headerBar: some View {
+        HStack(spacing: 16) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.lsAccent, .lsTeal],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 38, height: 38)
+                        .shadow(color: Color.lsAccent.opacity(0.28), radius: 10, x: 0, y: 5)
+
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("LanShare")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+
+                    Text(networkManager.port.map { "端口 \($0)" } ?? "服务准备中")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer(minLength: 16)
+
+            if !networkManager.localIPAddress.isEmpty {
+                statusPill(
+                    icon: "network",
+                    text: networkManager.localIPAddress,
+                    tint: .lsAccent,
+                    monospaced: true
+                )
+
+                statusPill(
+                    icon: networkManager.isServerRunning ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
+                    text: networkManager.isServerRunning ? "运行中" : "未启动",
+                    tint: networkManager.isServerRunning ? .lsSuccess : .red,
+                    monospaced: false
+                )
+            }
+
+            if updateChecker.hasUpdate {
+                toolbarButton(title: "更新", icon: "arrow.down.circle", action: openReleasePage)
+                    .overlay(alignment: .topTrailing) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                            .offset(x: 2, y: -2)
+                    }
+                    .help("发现新版本 \(updateChecker.latestVersion)，点击前往更新")
+            }
+
+            if networkManager.isServerRunning {
+                toolbarButton(title: "浏览器", icon: "safari", action: openCurrentPageInBrowser)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .background(.thinMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.lsDivider)
+                .frame(height: 1)
+        }
+    }
+
+    private var tabPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(AppTab.allCases, id: \.self) { tab in
+                tabButton(tab)
+            }
+        }
+        .padding(5)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.lsPanelBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.lsCardBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private var filesContent: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                dropZone
+
+                if !networkManager.sharedFiles.isEmpty {
+                    sharedFilesSection
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private var dropZone: some View {
+        VStack(spacing: 15) {
+            ZStack {
+                Circle()
+                    .fill(isDragging ? Color.lsAccent.opacity(0.16) : Color.primary.opacity(0.05))
+                    .frame(width: 70, height: 70)
+
+                Image(systemName: isDragging ? "arrow.down.doc.fill" : "square.and.arrow.up")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundColor(isDragging ? .lsAccent : .secondary)
+            }
+
+            VStack(spacing: 5) {
+                Text(isDragging ? "松开以添加文件" : "拖放文件到这里")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+
+                Text("生成局域网链接和二维码，手机或电脑都能直接访问")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Button {
+                showFilePicker = true
+            } label: {
+                Label("选择文件", systemImage: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 230)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(isDragging ? Color.lsAccent.opacity(0.08) : Color.lsCardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(
+                            isDragging ? Color.lsAccent : Color.lsCardBorder,
+                            style: StrokeStyle(lineWidth: isDragging ? 2 : 1.2, dash: isDragging ? [] : [9, 7])
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.04), radius: 16, x: 0, y: 8)
+        )
+        .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
+            handleDrop(providers: providers)
+            return true
+        }
+    }
+
+    private var sharedFilesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("共享中的文件", systemImage: "tray.full")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                Spacer()
+
+                Text("\(networkManager.sharedFiles.count) 个")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+            }
+
+            VStack(spacing: 10) {
+                ForEach(networkManager.sharedFiles) { file in
+                    SharedFileCard(
+                        file: file,
+                        networkManager: networkManager,
+                        onRemove: {
+                            withAnimation {
+                                networkManager.removeSharedFile(file)
+                            }
+                        },
+                        onCopySuccess: { message in
+                            showToastMessage(message)
+                        }
+                    )
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.lsPanelBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.lsCardBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private func statusPill(icon: String, text: String, tint: Color, monospaced: Bool) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(tint)
+
+            Text(text)
+                .font(monospaced ? .system(size: 12, weight: .medium, design: .monospaced) : .system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.primary)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(tint.opacity(0.12)))
+    }
+
+    private func toolbarButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+    }
+
+    private func tabButton(_ tab: AppTab) -> some View {
+        let isSelected = selectedTab == tab
+        let count = tab == .files ? networkManager.sharedFiles.count : networkManager.clipboardItems.count
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selectedTab = tab
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 13, weight: .semibold))
+
+                Text(tab.rawValue)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(isSelected ? .white : .secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(isSelected ? Color.lsAccent : Color.primary.opacity(0.08)))
+                }
+            }
+            .foregroundColor(isSelected ? .primary : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(isSelected ? Color.lsCardBackground : Color.clear)
+                    .shadow(color: isSelected ? Color.black.opacity(0.08) : .clear, radius: 8, x: 0, y: 3)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func handleDrop(providers: [NSItemProvider]) {
         for provider in providers {
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
@@ -299,7 +377,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     private func handleFileSelection(result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -310,26 +388,27 @@ struct ContentView: View {
             print("文件选择失败: \(error)")
         }
     }
-    
-    private func openFileListInBrowser() {
-        if let url = URL(string: networkManager.getFileListURL()) {
+
+    private func openCurrentPageInBrowser() {
+        let urlString = selectedTab == .clipboard ? networkManager.getClipboardURL() : networkManager.getFileListURL()
+        if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
         }
     }
-    
+
     // 打开 GitHub release 页面进行更新
     private func openReleasePage() {
         if let url = URL(string: updateChecker.releaseURL) {
             NSWorkspace.shared.open(url)
         }
     }
-    
+
     private func showToastMessage(_ message: String) {
         toastMessage = message
         withAnimation {
             showToast = true
         }
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation {
                 showToast = false
@@ -343,68 +422,63 @@ struct SharedFileCard: View {
     let networkManager: NetworkManager
     let onRemove: () -> Void
     let onCopySuccess: (String) -> Void
-    
+
     @State private var showQRPopover = false
     @State private var qrCodeImage: NSImage?
-    
+
     var shareURL: String {
         networkManager.getShareURL(for: file)
     }
-    
+
     var body: some View {
         HStack(spacing: 15) {
             // 文件图标
             ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.blue.opacity(0.1))
-                    .frame(width: 50, height: 50)
-                
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.lsAccent.opacity(0.12))
+                    .frame(width: 52, height: 52)
+
                 Image(systemName: iconForFile(file.name))
-                    .font(.system(size: 24))
-                    .foregroundColor(.blue)
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundColor(.lsAccent)
             }
-            
+
             // 文件信息
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(file.name)
-                    .font(.body)
-                    .fontWeight(.medium)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .lineLimit(1)
-                
+
                 HStack(spacing: 12) {
                     Label(file.sizeString, systemImage: "doc")
-                        .font(.caption)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
-                    
+
                     Label(formatDate(file.shareDate), systemImage: "clock")
-                        .font(.caption)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
                 }
             }
-            
+
             Spacer()
-            
+
             // 操作按钮
             HStack(spacing: 8) {
                 Button(action: copyToClipboard) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "link")
-                            .font(.caption)
-                        Text("复制链接")
-                            .font(.caption)
-                    }
+                    Label("复制链接", systemImage: "link")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                
-                Button(action: { 
+
+                Button(action: {
                     showQRPopover.toggle()
                     if showQRPopover && qrCodeImage == nil {
                         generateQRCode()
                     }
                 }) {
                     Image(systemName: "qrcode")
-                        .font(.caption)
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -418,37 +492,41 @@ struct SharedFileCard: View {
                         }
                     )
                 }
-                
+
                 Button(action: onRemove) {
                     Image(systemName: "trash")
-                        .font(.caption)
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .foregroundColor(.red)
             }
         }
-        .padding(15)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.lsCardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.lsCardBorder, lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.035), radius: 10, x: 0, y: 5)
         )
     }
-    
+
     private func generateQRCode() {
         DispatchQueue.global(qos: .userInitiated).async {
             let context = CIContext()
             let filter = CIFilter.qrCodeGenerator()
-            
+
             filter.message = Data(shareURL.utf8)
             filter.correctionLevel = "M"
-            
+
             if let outputImage = filter.outputImage {
                 let transform = CGAffineTransform(scaleX: 10, y: 10)
                 let scaledImage = outputImage.transformed(by: transform)
-                
+
                 if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
                     let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 120, height: 120))
                     DispatchQueue.main.async {
@@ -458,17 +536,17 @@ struct SharedFileCard: View {
             }
         }
     }
-    
+
     private func copyToClipboard() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(shareURL, forType: .string)
         onCopySuccess("链接已复制")
     }
-    
+
     private func iconForFile(_ fileName: String) -> String {
         let ext = (fileName as NSString).pathExtension.lowercased()
-        
+
         switch ext {
         case "jpg", "jpeg", "png", "gif", "bmp", "svg", "heic":
             return "photo"
@@ -492,7 +570,7 @@ struct SharedFileCard: View {
             return "doc"
         }
     }
-    
+
     private func formatDate(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -500,9 +578,13 @@ struct SharedFileCard: View {
     }
 }
 
-// 极简纯净风（Linear/Things）配色，强调色与 App 主色（系统蓝）一致
 extension Color {
-    static let lsAccent = Color(red: 0.0, green: 0.478, blue: 1.0)   // #007AFF 系统蓝
+    static let lsAccent = Color(red: 0.0, green: 0.478, blue: 1.0)
+    static let lsTeal = Color(red: 0.0, green: 0.72, blue: 0.78)
+    static let lsSuccess = Color(red: 0.2, green: 0.78, blue: 0.42)
+    static let lsWindowBackground = Color(nsColor: .windowBackgroundColor)
+    static let lsPanelBackground = Color(nsColor: .controlBackgroundColor).opacity(0.72)
+    static let lsCardBackground = Color(nsColor: .controlBackgroundColor)
     static let lsCardBorder = Color.primary.opacity(0.08)
     static let lsDivider = Color.primary.opacity(0.06)
 }
@@ -511,19 +593,19 @@ extension Color {
 struct ClipboardShareView: View {
     @ObservedObject var networkManager: NetworkManager
     let onCopySuccess: (String) -> Void
-    
+
     @State private var qrCodeImage: NSImage?
-    
+
     private var clipboardURL: String {
         networkManager.getClipboardURL()
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            
+
             Divider().overlay(Color.lsDivider)
-            
+
             // 左：剪贴板记录列表；右：常驻二维码连接面板
             HStack(alignment: .top, spacing: 18) {
                 Group {
@@ -544,51 +626,50 @@ struct ClipboardShareView: View {
                                 }
                             }
                         }
-                        .frame(maxHeight: 240)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                
+
                 qrColumn
             }
             .padding(.top, 16)
         }
-        .padding(16)
+        .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.lsPanelBackground)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.lsCardBorder, lineWidth: 1)
         )
         .onAppear { generateQRCode() }
         // 端口/IP 就绪或变化时刷新二维码，保证地址实时正确
         .onChange(of: clipboardURL) { _ in generateQRCode() }
     }
-    
+
     // 标题栏
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "doc.on.clipboard")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.lsAccent)
-            
-            Text("共享剪贴板")
                 .font(.system(size: 15, weight: .semibold))
-            
+                .foregroundColor(.lsAccent)
+
+            Text("共享剪贴板")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+
             Text("\(networkManager.clipboardItems.count)")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(Color.primary.opacity(0.06)))
-            
+
             Spacer()
-            
+
             iconButton(systemName: "safari") { openClipboardInBrowser() }
                 .help("浏览器打开")
-            
+
             if !networkManager.clipboardItems.isEmpty {
                 iconButton(systemName: "trash") { networkManager.clearClipboardItems() }
                     .help("清空全部")
@@ -596,7 +677,7 @@ struct ClipboardShareView: View {
         }
         .padding(.bottom, 14)
     }
-    
+
     // 常驻二维码连接面板
     private var qrColumn: some View {
         VStack(spacing: 10) {
@@ -616,7 +697,7 @@ struct ClipboardShareView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.white))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.lsCardBorder, lineWidth: 1))
-            
+
             VStack(spacing: 3) {
                 HStack(spacing: 5) {
                     Image(systemName: "qrcode")
@@ -625,7 +706,7 @@ struct ClipboardShareView: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundColor(.lsAccent)
-                
+
                 Text("手机扫码查看/发送")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
@@ -634,9 +715,10 @@ struct ClipboardShareView: View {
         .frame(width: 140)
         .padding(.vertical, 14)
         .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.lsAccent.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.lsAccent.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.lsCardBorder, lineWidth: 1))
     }
-    
+
     // 空态
     private var emptyState: some View {
         VStack(spacing: 8) {
@@ -649,7 +731,7 @@ struct ClipboardShareView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 150)
     }
-    
+
     // 统一的小图标按钮
     private func iconButton(systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -664,22 +746,22 @@ struct ClipboardShareView: View {
         }
         .buttonStyle(.plain)
     }
-    
+
     // 生成剪贴板地址二维码
     private func generateQRCode() {
         let urlString = clipboardURL
         guard !urlString.isEmpty else { return }
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             let context = CIContext()
             let filter = CIFilter.qrCodeGenerator()
             filter.message = Data(urlString.utf8)
             filter.correctionLevel = "M"
-            
+
             if let outputImage = filter.outputImage {
                 let transform = CGAffineTransform(scaleX: 10, y: 10)
                 let scaledImage = outputImage.transformed(by: transform)
-                
+
                 if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
                     let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 120, height: 120))
                     DispatchQueue.main.async {
@@ -689,7 +771,7 @@ struct ClipboardShareView: View {
             }
         }
     }
-    
+
     // 把某条剪贴板内容重新写回系统剪贴板
     private func copyItem(_ item: ClipboardItem) {
         let pasteboard = NSPasteboard.general
@@ -697,7 +779,7 @@ struct ClipboardShareView: View {
         pasteboard.setString(item.text, forType: .string)
         onCopySuccess("已复制到系统剪贴板")
     }
-    
+
     private func openClipboardInBrowser() {
         if let url = URL(string: clipboardURL) {
             NSWorkspace.shared.open(url)
@@ -710,25 +792,25 @@ struct ClipboardRowView: View {
     let item: ClipboardItem
     let onCopy: () -> Void
     let onRemove: () -> Void
-    
+
     @State private var isHovered = false
-    
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.text)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(.primary)
                     .lineLimit(3)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
-                
+
                 Text(relativeTime(item.date))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
-            
+
             HStack(spacing: 4) {
                 Button(action: onCopy) {
                     Image(systemName: "doc.on.doc")
@@ -739,7 +821,7 @@ struct ClipboardRowView: View {
                 }
                 .buttonStyle(.plain)
                 .help("复制到系统剪贴板")
-                
+
                 Button(action: onRemove) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .semibold))
@@ -753,11 +835,15 @@ struct ClipboardRowView: View {
             .opacity(isHovered ? 1 : 0.35)
         }
         .padding(.vertical, 11)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovered ? Color.primary.opacity(0.035) : Color.clear)
+        )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
     }
-    
+
     private func relativeTime(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -769,7 +855,7 @@ struct ClipboardRowView: View {
 struct SpeedLimitSettingsView: View {
     @ObservedObject var networkManager: NetworkManager
     @State private var speedInput: String = "1024"
-    
+
     var body: some View {
         HStack(spacing: 15) {
             // 限速开关
@@ -779,23 +865,22 @@ struct SpeedLimitSettingsView: View {
                         .font(.caption)
                         .foregroundColor(networkManager.isSpeedLimitEnabled ? .orange : .secondary)
                     Text("限速传输")
-                        .font(.caption)
-                        .fontWeight(.medium)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
             }
             .toggleStyle(.switch)
             .controlSize(.small)
-            
+
             Divider()
                 .frame(height: 20)
                 .opacity(networkManager.isSpeedLimitEnabled ? 1 : 0)
-            
+
             // 速度设置
             HStack(spacing: 8) {
                 Text("速度限制:")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 TextField("", text: $speedInput)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 80)
@@ -804,11 +889,11 @@ struct SpeedLimitSettingsView: View {
                         updateSpeedLimit()
                     }
                     .disabled(!networkManager.isSpeedLimitEnabled)
-                
+
                 Text("KB/s")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 // 快速设置按钮
                 HStack(spacing: 4) {
                     SpeedPresetButton(value: 512, label: "512", networkManager: networkManager, speedInput: $speedInput)
@@ -819,7 +904,7 @@ struct SpeedLimitSettingsView: View {
                 .disabled(!networkManager.isSpeedLimitEnabled)
             }
             .opacity(networkManager.isSpeedLimitEnabled ? 1 : 0)
-            
+
             // 实时显示当前速度
             HStack(spacing: 6) {
                 Image(systemName: "speedometer")
@@ -835,18 +920,24 @@ struct SpeedLimitSettingsView: View {
             .background(Color.blue.opacity(0.1))
             .cornerRadius(6)
             .opacity(networkManager.isSpeedLimitEnabled ? 1 : 0)
-            
+
             Spacer()
         }
-        .frame(height: 40)
-        .padding(.horizontal, 25)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.lsPanelBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.lsCardBorder, lineWidth: 1)
+                )
+        )
         .onAppear {
             speedInput = "\(networkManager.speedLimitKBps)"
         }
     }
-    
+
     private func updateSpeedLimit() {
         if let speed = Int(speedInput), speed > 0 {
             networkManager.speedLimitKBps = speed
@@ -854,7 +945,7 @@ struct SpeedLimitSettingsView: View {
             speedInput = "\(networkManager.speedLimitKBps)"
         }
     }
-    
+
     private func formatSpeed(_ kbps: Int) -> String {
         if kbps >= 1024 {
             let mbps = Double(kbps) / 1024.0
@@ -871,7 +962,7 @@ struct SpeedPresetButton: View {
     let label: String
     @ObservedObject var networkManager: NetworkManager
     @Binding var speedInput: String
-    
+
     var body: some View {
         Button(label) {
             networkManager.speedLimitKBps = value
@@ -888,7 +979,7 @@ struct QRCodePopoverView: View {
     let qrCodeImage: NSImage?
     let shareURL: String
     let onCopy: () -> Void
-    
+
     var body: some View {
         VStack(spacing: 15) {
             // 二维码
@@ -908,18 +999,18 @@ struct QRCodePopoverView: View {
                         ProgressView()
                     )
             }
-            
+
             Text("扫码下载")
                 .font(.headline)
-            
+
             Divider()
-            
+
             // 分享链接
             VStack(spacing: 8) {
                 Text("分享链接")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 Text(shareURL)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(.primary)
@@ -931,7 +1022,7 @@ struct QRCodePopoverView: View {
                     .frame(maxWidth: .infinity)
                     .background(Color.gray.opacity(0.1))
                     .cornerRadius(6)
-                
+
                 Button(action: onCopy) {
                     HStack(spacing: 5) {
                         Image(systemName: "doc.on.doc")
@@ -942,7 +1033,7 @@ struct QRCodePopoverView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
-            
+
             HStack(spacing: 6) {
                 Image(systemName: "info.circle")
                     .font(.caption2)
