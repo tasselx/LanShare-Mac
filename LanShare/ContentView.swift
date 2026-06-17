@@ -572,9 +572,10 @@ struct SharedFileCard: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 }
 
